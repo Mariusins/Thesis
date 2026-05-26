@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual env
+.venv/
+venv/
+env/
+ENV/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Secrets / env
+.env
+.env.*
+*.key
+*.pem
+secrets.json
+
+# Tiktoken / model caches
+TravelPlanner/agents/tmp/
+TravelPlanner/tmp/
+.cache/
+
+# TravelPlanner data (327M, regenerable from upstream)
+TravelPlanner/database/
+
+# Generated outputs — keep results.jsonl + summaries, drop per-query plan dumps
+TravelPlanner/results/**/generated_plans/
+TravelPlanner/results/**/*.tmp
+
+# Logs
+*.log
+logs/
+
+# Jupyter
+*.ipynb_checkpoints/
+*.ipynb
+
+# Build / dist
+build/
+dist/
+*.egg
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+
+# Generated reports (regenerable)
+TravelPlanner/RQ2_IMPLEMENTATION_REPORT.html
