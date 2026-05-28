@@ -15,6 +15,9 @@ venv/
 env/
 ENV/
 
+# Archived inner repo (kept for rollback, see TravelPlanner/.git.backup)
+.git.backup/
+
 # OS junk
 .DS_Store
 Thumbs.db
@@ -35,8 +38,7 @@ desktop.ini
 secrets.json
 
 # Tiktoken / model caches
-TravelPlanner/agents/tmp/
-TravelPlanner/tmp/
+TravelPlanner/**/tmp/
 .cache/
 
 # TravelPlanner data (327M, regenerable from upstream)

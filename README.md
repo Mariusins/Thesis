@@ -19,12 +19,19 @@ OpenAI-compatible endpoint works.
    git clone <repo-url> ~/Thesis
    cd ~/Thesis/TravelPlanner
    ```
-3. Bootstrap venv + prefetch model weights:
+3. Bootstrap venv + database + prefetch model weights:
    ```bash
    bash scripts/env_setup.sh
    ```
-   Default model: `Qwen/Qwen2.5-7B-Instruct`. Override with
+   This installs deps, downloads the 327 MB TravelPlanner database from
+   Google Drive (via `scripts/fetch_database.sh`, idempotent), and prefetches
+   the model weights. Default model: `Qwen/Qwen2.5-7B-Instruct`. Override with
    `TP_MODEL=Qwen/Qwen2.5-72B-Instruct-AWQ bash scripts/env_setup.sh` if scaling up.
+
+   If you only need the database (e.g. local dev after a fresh clone):
+   ```bash
+   bash scripts/fetch_database.sh
+   ```
 
 ### Submitting jobs
 

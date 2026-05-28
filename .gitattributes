@@ -1,0 +1,3 @@
+# HPC bash scripts and Slurm sbatch files must stay LF for Linux execution.
+*.sh   text eol=lf
+*.sbatch text eol=lf
