@@ -1,0 +1,34 @@
+{
+  "config": "planner_executor",
+  "split": "validation",
+  "seed": 1,
+  "n_queries": 180,
+  "delivery_rate": 0.7444444444444445,
+  "commonsense_macro_pass_rate": 0.03888888888888889,
+  "hard_macro_pass_rate": 0.044444444444444446,
+  "final_pass_rate": 0.016666666666666666,
+  "commonsense_micro_pass_rate": 0.4909722222222222,
+  "hard_micro_pass_rate": 0.6739130434782609,
+  "failure_reasons": {
+    "constraint_fail": 131,
+    "pass": 3,
+    "empty_answer": 46
+  },
+  "commonsense_check_failures": {
+    "is_reasonable_visiting_city": 44,
+    "is_valid_restaurants": 65,
+    "is_valid_attractions": 2,
+    "is_valid_accommodation": 43,
+    "is_valid_transportation": 17,
+    "is_valid_information_in_current_city": 42,
+    "is_valid_information_in_sandbox": 101,
+    "is_not_absent": 51
+  },
+  "hard_check_failures": {
+    "valid_cuisine": 1,
+    "valid_room_rule": 3,
+    "valid_transportation": 0,
+    "valid_room_type": 1,
+    "valid_cost": 10
+  }
+}

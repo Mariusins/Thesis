@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RQ1 Execution Flow — Planner-Executor vs Single-Agent ReAct</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --ink: #e7e9ee;
+    --muted: #9aa3b2;
+    --accent: #6ea8fe;
+    --border: #2a2f3a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { padding: 28px 32px 12px; border-bottom: 1px solid var(--border); }
+  h1 { font-size: 20px; margin: 0 0 6px; font-weight: 650; }
+  header p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; max-width: 900px; }
+  .toolbar { padding: 14px 32px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border); }
+  button { background: var(--panel); color: var(--ink); border: 1px solid var(--border);
+    padding: 7px 14px; border-radius: 8px; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--accent); color: #fff; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .diagram-wrap { padding: 24px 32px 48px; overflow: auto; }
+  .mermaid { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 24px; transform-origin: top left; }
+  footer { padding: 0 32px 40px; color: var(--muted); font-size: 12px; line-height: 1.6; }
+  code { background: #1d2129; padding: 1px 6px; border-radius: 5px; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RQ1 Execution Flow — Planner-Executor vs Single-Agent ReAct</h1>
+  <p>Three phases: <strong>①</strong> SLURM job &amp; vLLM bring-up, <strong>②</strong> generation via
+  <code>run_rq1.py</code>, <strong>③</strong> offline scoring + paired-bootstrap stats. Generation runs locally
+  on Qwen via vLLM; scoring uses hosted gpt-4o-mini to parse NL plans and the upstream constraint checkers.</p>
+</header>
+
+<div class="toolbar">
+  <button onclick="zoom(0.1)">Zoom +</button>
+  <button onclick="zoom(-0.1)">Zoom −</button>
+  <button onclick="resetZoom()">Reset</button>
+  <span class="hint">Scroll to pan · diagram renders client-side via Mermaid (needs internet for the CDN).</span>
+</div>
+
+<div class="diagram-wrap">
+<pre class="mermaid">
+flowchart TD
+    subgraph PHASE1["&#9312; SLURM job bring-up — slurm/run_rq1.sbatch"]
+        A["sbatch run_rq1.sbatch &lt;config&gt; &lt;split&gt; &lt;seed&gt;<br/>config &#8712; {single_react, planner_executor}"] --> B["Create /local/$JOB_ID scratch<br/>(EXIT trap to clean up)"]
+        B --> C["conda activate Marius"]
+        C --> D["Stage HF model snapshot<br/>~/.cache &#8594; /local NVMe (cp -aL)"]
+        D --> E["Launch vLLM OpenAI server<br/>127.0.0.1:8000 · max-len 16384 · gpu-util 0.82"]
+        E --> F{"/health OK<br/>within 1200s?"}
+        F -- no --> FX["tail vLLM log &#8594; exit 1"]
+        F -- yes --> G["export OPENAI_BASE_URL=&#8230;:8000/v1<br/>rebind HF cache to /home (offline)"]
+    end
+
+    G --> H
+
+    subgraph PHASE2["&#9313; Generation — python -m eval_runner.run_rq1 --backend vllm"]
+        H["load_dataset('osunlp/TravelPlanner','validation')<br/>pilot&#8594;first 20 · validation&#8594;all 180"] --> I["_load_done(): read results.jsonl<br/>skip already-done idx (resumable)"]
+        I --> J["for idx in queries"]
+        J --> K{"config?"}
+
+        K -- single_react --> L1["SingleAgentReact(model, seed)<br/>ReactAgent · 7 tools · &#8804;30 steps"]
+        K -- planner_executor --> M1["PlannerAgent.plan()<br/>JSON-object call, no tools"]
+        M1 --> M2{"valid JSON &amp;<br/>schema OK?<br/>(&#8804;2 attempts)"}
+        M2 -- yes --> M3["Inject plan into executor prompt<br/>EXECUTOR_PLAN_PREAMBLE + template"]
+        M2 -- no --> M4["DEGRADED: plain ReAct<br/>(degraded=true)"]
+        M3 --> L2["ReactAgent executor<br/>7 tools · &#8804;30 steps · shared TokenLedger"]
+        M4 --> L2
+
+        L1 --> N["agent.run(query) &#8594;<br/>answer · scratchpad · action_log · ledger"]
+        L2 --> N
+        N --> O["Append record &#8594; results.jsonl<br/>(idx, answer, ledger, plan_valid, degraded, wall_s)"]
+        O --> P["Write generated_plans/generated_plan_&lt;idx+1&gt;.json<br/>(upstream-eval-compatible NL plan)"]
+        P --> J
+    end
+
+    J -- all queries done --> Q["EXIT trap: kill vLLM · rm /local scratch"]
+    Q --> R
+
+    subgraph PHASE3["&#9314; Offline scoring + stats (needs OPENAI_API_KEY)"]
+        R["python -m eval_runner.run_pilot_eval<br/>--config &#8230; --split validation --seed N"] --> S["For each generated plan:<br/>parse NL &#8594; JSON via gpt-4o-mini"]
+        S --> T["commonsense_eval + hard_constraint eval<br/>(upstream checkers)"]
+        T --> U["Write eval_score.json (per-query)<br/>+ pilot_summary.json (rates)"]
+        U --> V["Repeat for both configs &#215; seeds 0,1,2"]
+        V --> W["python -m eval_runner.stats<br/>--config-a single_react --config-b planner_executor<br/>--seeds 0 1 2"]
+        W --> X["Paired bootstrap CI<br/>per-seed mean diff (B&#8722;A)"]
+    end
+
+    classDef phase fill:#12161d,stroke:#2a2f3a,color:#e7e9ee;
+    classDef decision fill:#2a2233,stroke:#6e5494,color:#fff;
+    classDef fail fill:#3a1f1f,stroke:#a04545,color:#ffd9d9;
+    classDef good fill:#16261b,stroke:#3fa45f,color:#d7ffe2;
+    class F,M2,K decision;
+    class FX,M4 fail;
+    class X good;
+</pre>
+</div>
+
+<footer>
+  <strong>Notes.</strong> Phases &#9313; and &#9314; are decoupled: <code>run_rq1.py</code> only generates NL plans on the
+  cluster (vLLM/Qwen, no scoring); scoring runs later. The executor is identical across both configs — only the
+  injected plan differs (the &ldquo;matched compute&rdquo; lever). Two fallbacks guarantee a per-query answer:
+  planner JSON failure &#8594; degraded plain-ReAct, and resumability re-runs only missing <code>idx</code>.
+</footer>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "dark",
+    flowchart: { useMaxWidth: false, htmlLabels: true, nodeSpacing: 40, rankSpacing: 50 },
+  });
+
+  let scale = 1;
+  const el = () => document.querySelector(".mermaid");
+  window.zoom = (d) => { scale = Math.max(0.3, scale + d); el().style.transform = `scale(${scale})`; };
+  window.resetZoom = () => { scale = 1; el().style.transform = "scale(1)"; };
+</script>
+</body>
+</html>

@@ -53,6 +53,25 @@ def paired_bootstrap_ci(
     return mean_diff, lo, hi
 
 
+def extract_metric(rec: Dict, metric: str) -> float:
+    """Map a metric name to a per-query float in [0, 1].
+
+    Handles the eval_score.json schema where macro checks are booleans
+    (possibly None) and micro checks are stored as passes/total pairs.
+    None (e.g. hard_pass on an undelivered plan) counts as 0.0.
+    """
+    # derived micro ratios
+    if metric in ("commonsense_micro", "hard_micro"):
+        prefix = metric[: -len("_micro")]
+        passes = rec.get(f"{prefix}_micro_passes", 0) or 0
+        total = rec.get(f"{prefix}_micro_total", 0) or 0
+        return passes / total if total > 0 else 0.0
+    val = rec.get(metric, 0)
+    if val is None:
+        return 0.0
+    return float(val)
+
+
 def aggregate_seeds(per_seed_means: Dict[int, float]) -> Dict[str, float]:
     xs = list(per_seed_means.values())
     return {
@@ -70,24 +89,30 @@ def main():
     ap.add_argument("--seeds", type=int, nargs="+", default=[0, 1, 2])
     ap.add_argument("--metric", default="final_pass_rate")
     ap.add_argument("--results-root", default="results/rq1")
+    ap.add_argument("--results-root-a", default=None,
+                    help="override results root for config-a (defaults to --results-root); "
+                         "use to compare two models, e.g. 14B vs 72B")
+    ap.add_argument("--results-root-b", default=None,
+                    help="override results root for config-b (defaults to --results-root)")
     args = ap.parse_args()
 
-    root = Path(args.results_root)
+    root_a = Path(args.results_root_a or args.results_root)
+    root_b = Path(args.results_root_b or args.results_root)
 
-    def per_query_scores(config: str, seed: int) -> Dict[int, float]:
+    def per_query_scores(config: str, seed: int, root: Path) -> Dict[int, float]:
         p = root / config / args.split / f"seed{seed}" / "eval_score.json"
         if not p.exists():
             raise FileNotFoundError(f"missing {p} -- run upstream evaluation/eval.py first")
         scores = _load_per_query_scores(p)
-        return {idx: float(rec.get(args.metric, 0)) for idx, rec in scores.items()}
+        return {idx: extract_metric(rec, args.metric) for idx, rec in scores.items()}
 
     a_per_seed: Dict[int, float] = {}
     b_per_seed: Dict[int, float] = {}
     diffs_per_seed: List[Tuple[int, float, float, float]] = []
 
     for seed in args.seeds:
-        a_scores = per_query_scores(args.config_a, seed)
-        b_scores = per_query_scores(args.config_b, seed)
+        a_scores = per_query_scores(args.config_a, seed, root_a)
+        b_scores = per_query_scores(args.config_b, seed, root_b)
         common = sorted(set(a_scores) & set(b_scores))
         a_vec = [a_scores[i] for i in common]
         b_vec = [b_scores[i] for i in common]
@@ -98,8 +123,10 @@ def main():
 
     out = {
         "metric": args.metric,
-        "config_a": {**aggregate_seeds(a_per_seed), "per_seed": a_per_seed},
-        "config_b": {**aggregate_seeds(b_per_seed), "per_seed": b_per_seed},
+        "config_a": {"name": args.config_a, "results_root": str(root_a),
+                     **aggregate_seeds(a_per_seed), "per_seed": a_per_seed},
+        "config_b": {"name": args.config_b, "results_root": str(root_b),
+                     **aggregate_seeds(b_per_seed), "per_seed": b_per_seed},
         "paired_diff_per_seed": [
             {"seed": s, "mean_diff_b_minus_a": d, "ci_low": lo, "ci_high": hi}
             for (s, d, lo, hi) in diffs_per_seed

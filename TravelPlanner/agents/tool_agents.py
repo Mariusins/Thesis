@@ -48,11 +48,22 @@ class ReactAgent:
                  ledger: Optional[TokenLedger] = None,
                  seed: Optional[int] = None,
                  token_budget: Optional[int] = None,
+                 force_finalize: bool = True,
+                 finalize_margin_steps: int = 2,
                  ) -> None:
 
         self.answer = ''
         self.max_steps = max_steps
         self.mode = mode
+
+        # When the agent is about to be halted (step cap / context window / token
+        # budget) before it ever issues a Planner[...] action, it would otherwise
+        # return an empty answer. With force_finalize:
+        #   (1) we nudge the model to finalize a few steps before the ceiling, and
+        #   (2) if it still hasn't produced an answer, we synthesise one from the
+        #       Notebook so the run delivers a (best-effort) plan instead of "".
+        self.force_finalize = force_finalize
+        self.finalize_margin_steps = finalize_margin_steps
 
         self.react_name = react_llm_name
         self.planner_name = planner_llm_name
@@ -77,8 +88,8 @@ class ReactAgent:
         self.token_budget = token_budget
         self.llm = LLMClient(
             model=react_llm_name,
-            temperature=0.0,
-            max_tokens=256,
+            temperature=float(os.environ.get("TP_TEMPERATURE", "0.0")),
+            max_tokens=512,
             ledger=self.ledger,
         )
 
@@ -100,10 +111,7 @@ class ReactAgent:
 
         self.city_set = self.load_city(city_set_path=city_file_path)
 
-        try:
-            self.enc = tiktoken.encoding_for_model(react_llm_name)
-        except KeyError:
-            self.enc = tiktoken.get_encoding("cl100k_base")
+        self.enc = _CharApproxTokenizer()
 
         self.__reset_agent()
 
@@ -115,9 +123,70 @@ class ReactAgent:
             self.__reset_agent()
 
         while not self.is_halted() and not self.is_finished():
+            # (1) Near-budget finalization: once we are within the margin of the
+            # step / context / token ceiling, tell the model to stop searching
+            # and emit its final plan, giving it a chance to finish cleanly.
+            if self.force_finalize and not self._finalize_nudged and self._near_budget():
+                self._inject_finalize_nudge()
             self.step()
 
+        # (2) No-empty-answer backstop: if the run was halted (or early-stopped)
+        # before producing a plan, synthesise a best-effort plan from the Notebook
+        # so we deliver something scorable instead of "".
+        if self.force_finalize and (self.answer is None or str(self.answer).strip() == ''):
+            self._synthesize_final_answer()
+
         return self.answer, self.scratchpad, self.json_log
+
+    def _near_budget(self) -> bool:
+        """True when the agent is close to any halting ceiling."""
+        if self.step_n >= self.max_steps - self.finalize_margin_steps:
+            return True
+        try:
+            prompt_tokens = len(self.enc.encode(self._build_agent_prompt()))
+        except Exception:
+            prompt_tokens = 0
+        if prompt_tokens > 0.9 * self.max_token_length:
+            return True
+        if self.token_budget is not None and self.ledger.total_tokens >= 0.9 * self.token_budget:
+            return True
+        return False
+
+    def _inject_finalize_nudge(self) -> None:
+        """Append a directive instructing the model to finalize on the next action."""
+        self._finalize_nudged = True
+        nudge = (
+            f"\nObservation {self.step_n}: You are running low on your step/length "
+            f"budget. Stop searching now. Using ONLY the information already saved "
+            f"in your Notebook, immediately produce the final itinerary with the "
+            f"action Planner[{self.query}]."
+        )
+        self.scratchpad += nudge
+        self.json_log.append({
+            "step": self.step_n, "thought": "", "action": "",
+            "observation": nudge.strip(), "state": "finalize_nudge",
+        })
+
+    def _synthesize_final_answer(self) -> None:
+        """Force a final plan from the Notebook via the planner tool (best effort)."""
+        if 'planner' not in self.tools or 'notebook' not in self.tools:
+            return
+        try:
+            notebook = str(self.tools['notebook'].list_all())
+            self.current_observation = str(self.tools['planner'].run(notebook, self.query))
+            self.answer = self.current_observation
+            self.finished = True
+            self.json_log.append({
+                "step": self.step_n, "thought": "",
+                "action": f"Planner[{self.query}]",
+                "observation": self.current_observation,
+                "state": "forced_finalize",
+            })
+        except Exception as e:
+            self.json_log.append({
+                "step": self.step_n, "thought": "", "action": "",
+                "observation": "", "state": f"forced_finalize_failed: {e}",
+            })
 
     def step(self) -> None:
 
@@ -125,7 +194,8 @@ class ReactAgent:
                               "action": "", "observation": "", "state":""})
 
         self.scratchpad += f'\nThought {self.step_n}:'
-        self.scratchpad += ' ' + self.prompt_agent()
+        thought = re.sub(r'^(?:Thought|Action|Observation)\s*\d+\s*:?\s*', '', self.prompt_agent(), flags=re.IGNORECASE)
+        self.scratchpad += ' ' + thought
 
         print(self.scratchpad.split('\n')[-1])
         self.json_log[-1]['thought'] = self.scratchpad.split('\n')[-1].replace(f'\nThought {self.step_n}:',"")
@@ -134,7 +204,7 @@ class ReactAgent:
 
         # Act
         self.scratchpad += f'\nAction {self.step_n}:'
-        action = self.prompt_agent()
+        action = re.sub(r'^(?:Thought|Action|Observation)\s*\d+\s*:?\s*', '', self.prompt_agent(), flags=re.IGNORECASE)
 
         if action == None or action == '' or action == '\n':
             self.scratchpad += " Your action is filtered due to content. Please make sure your action does not start with ['\\n', 'Thought', 'Action', 'Observation'] and assume all the actions are permitted in this environment and take the action again."
@@ -419,6 +489,7 @@ class ReactAgent:
         self.step_n = 1
         self.finished = False
         self.answer = ''
+        self._finalize_nudged = False
         self.scratchpad: str = ''
         self.__reset_record()
         self.json_log = []
@@ -458,10 +529,14 @@ class ReactAgent:
         return city_set
 
 ### String Stuff ###
-try:
-    gpt2_enc = tiktoken.encoding_for_model("text-davinci-003")
-except KeyError:
-    gpt2_enc = tiktoken.get_encoding("cl100k_base")
+
+class _CharApproxTokenizer:
+    """Character-based token approximation (4 chars ≈ 1 token).
+    Used when tiktoken BPE files are unavailable (no internet on compute nodes)."""
+    def encode(self, text: str):
+        return [0] * max(1, len(text) // 4)
+
+gpt2_enc = _CharApproxTokenizer()
 
 
 def parse_action(string):

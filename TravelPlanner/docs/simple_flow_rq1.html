@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RQ1 — Simple Flow</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #0f1115; color: #e7e9ee;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  header { padding: 32px 32px 8px; text-align: center; }
+  h1 { font-size: 22px; margin: 0 0 6px; font-weight: 650; }
+  header p { margin: 0; color: #9aa3b2; font-size: 15px; }
+  .wrap { display: flex; justify-content: center; padding: 32px 24px 56px; }
+  .mermaid { background: #171a21; border: 1px solid #2a2f3a; border-radius: 14px; padding: 32px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RQ1 at a glance</h1>
+  <p>Does a two-agent <em>planner&#8594;executor</em> beat a single-agent ReAct baseline, under matched compute?</p>
+</header>
+
+<div class="wrap">
+<pre class="mermaid">
+flowchart TD
+    Q["&#128205; TravelPlanner queries<br/>(validation set)"]
+
+    Q --> B["&#129302; Baseline<br/><b>Single-agent ReAct</b><br/>one agent, plans with tools"]
+    Q --> P["&#129489;&#8205;&#127891; My approach<br/><b>Planner &#8594; Executor</b><br/>planner drafts a plan, executor carries it out"]
+
+    B --> R["&#128221; Travel plan produced"]
+    P --> R
+
+    R --> E["&#9878;&#65039; Score against constraints<br/>(commonsense + hard rules)"]
+    E --> C["&#128202; Compare the two<br/>which passes more? at what compute cost?"]
+
+    classDef base fill:#1b2330,stroke:#4a6da8,color:#dce8ff;
+    classDef mine fill:#16261b,stroke:#3fa45f,color:#d7ffe2;
+    classDef neutral fill:#12161d,stroke:#2a2f3a,color:#e7e9ee;
+    class B base;
+    class P mine;
+    class Q,R,E,C neutral;
+</pre>
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "dark",
+    flowchart: { useMaxWidth: false, htmlLabels: true, nodeSpacing: 55, rankSpacing: 55 } });
+</script>
+</body>
+</html>

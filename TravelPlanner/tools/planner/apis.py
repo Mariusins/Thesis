@@ -16,6 +16,12 @@ from llm_client import LLMClient, TokenLedger
 from env import ReactEnv, ReactReflectEnv
 import tiktoken
 import re
+
+class _CharApproxTokenizer:
+    """Character-based token approximation (4 chars ≈ 1 token).
+    Used when tiktoken BPE files are unavailable (no internet on compute nodes)."""
+    def encode(self, text: str):
+        return [0] * max(1, len(text) // 4)
 import time
 from enum import Enum
 from typing import List, Optional, Union, Literal
@@ -44,10 +50,7 @@ class Planner:
         self.scratchpad: str = ''
         self.model_name = model_name
         self.seed = seed
-        try:
-            self.enc = tiktoken.encoding_for_model(model_name)
-        except KeyError:
-            self.enc = tiktoken.get_encoding("cl100k_base")
+        self.enc = _CharApproxTokenizer()
 
         self.ledger = ledger if ledger is not None else TokenLedger()
         self.llm = LLMClient(
@@ -104,10 +107,7 @@ class ReactPlanner:
         self.reset()
         self.finished = False
         self.answer = ''
-        try:
-            self.enc = tiktoken.encoding_for_model(model_name)
-        except KeyError:
-            self.enc = tiktoken.get_encoding("cl100k_base")
+        self.enc = _CharApproxTokenizer()
 
     def run(self, text, query, reset = True) -> None:
 
@@ -127,12 +127,13 @@ class ReactPlanner:
     def step(self) -> None:
         # Think
         self.scratchpad += f'\nThought {self.curr_step}:'
-        self.scratchpad += ' ' + self.prompt_agent()
+        thought = re.sub(r'^(?:Thought|Action|Observation)\s*\d+\s*:?\s*', '', self.prompt_agent(), flags=re.IGNORECASE)
+        self.scratchpad += ' ' + thought
         print(self.scratchpad.split('\n')[-1])
 
         # Act
         self.scratchpad += f'\nAction {self.curr_step}:'
-        action = self.prompt_agent()
+        action = re.sub(r'^(?:Thought|Action|Observation)\s*\d+\s*:?\s*', '', self.prompt_agent(), flags=re.IGNORECASE)
         self.scratchpad += ' ' + action
         print(self.scratchpad.split('\n')[-1])
 
@@ -151,15 +152,15 @@ class ReactPlanner:
                 observation = f'The sub plan can not be parsed into json format, please check.'
             except ValueError as e:
                 observation = str(e)
-        
+
         elif action_type == 'Finish':
             self.finished = True
             observation = f'The plan is finished.'
             self.answer = action_arg
-        
+
         else:
             observation = f'Action {action_type} is not supported.'
-        
+
         self.curr_step += 1
 
         self.scratchpad += observation
@@ -222,10 +223,7 @@ class ReactReflectPlanner:
         self.answer = ''
         self.reflections: List[str] = []
         self.reflections_str: str = ''
-        try:
-            self.enc = tiktoken.encoding_for_model(model_name)
-        except KeyError:
-            self.enc = tiktoken.get_encoding("cl100k_base")
+        self.enc = _CharApproxTokenizer()
 
     def run(self, text, query, reset = True) -> None:
 
@@ -248,12 +246,13 @@ class ReactReflectPlanner:
     def step(self) -> None:
         # Think
         self.scratchpad += f'\nThought {self.curr_step}:'
-        self.scratchpad += ' ' + self.prompt_agent()
+        thought = re.sub(r'^(?:Thought|Action|Observation)\s*\d+\s*:?\s*', '', self.prompt_agent(), flags=re.IGNORECASE)
+        self.scratchpad += ' ' + thought
         print(self.scratchpad.split('\n')[-1])
 
         # Act
         self.scratchpad += f'\nAction {self.curr_step}:'
-        action = self.prompt_agent()
+        action = re.sub(r'^(?:Thought|Action|Observation)\s*\d+\s*:?\s*', '', self.prompt_agent(), flags=re.IGNORECASE)
         self.scratchpad += ' ' + action
         print(self.scratchpad.split('\n')[-1])
 
@@ -272,15 +271,15 @@ class ReactReflectPlanner:
                 observation = f'The sub plan can not be parsed into json format, please check.'
             except ValueError as e:
                 observation = str(e)
-        
+
         elif action_type == 'Finish':
             self.finished = True
             observation = f'The plan is finished.'
             self.answer = action_arg
-        
+
         else:
             observation = f'Action {action_type} is not supported.'
-        
+
         self.curr_step += 1
 
         self.scratchpad += observation

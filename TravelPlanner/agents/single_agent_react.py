@@ -31,6 +31,7 @@ class SingleAgentReact:
         max_steps: int = 30,
         ledger: Optional[TokenLedger] = None,
         token_budget: Optional[int] = None,
+        force_finalize: bool = True,
     ) -> None:
         self.ledger = ledger if ledger is not None else TokenLedger()
         self.seed = seed
@@ -44,6 +45,7 @@ class SingleAgentReact:
             ledger=self.ledger,
             seed=seed,
             token_budget=token_budget,
+            force_finalize=force_finalize,
         )
 
     def run(self, query_record: Dict[str, Any]):

@@ -12,6 +12,7 @@ so the query still produces an answer (degraded mode flagged in the result).
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -61,7 +62,7 @@ class PlannerAgent:
         self.seed = seed
         self.llm = LLMClient(
             model=model,
-            temperature=0.0,
+            temperature=float(os.environ.get("TP_TEMPERATURE", "0.0")),
             max_tokens=2048,
             ledger=self.ledger,
         )
@@ -126,6 +127,7 @@ class PlannerExecutorAgent:
         model: str = "gpt-4o-mini",
         seed: Optional[int] = None,
         max_steps: int = 30,
+        force_finalize: bool = True,
     ) -> None:
         self.ledger = TokenLedger()
         self.seed = seed
@@ -139,6 +141,7 @@ class PlannerExecutorAgent:
             planner_llm_name=model,
             ledger=self.ledger,
             seed=seed,
+            force_finalize=force_finalize,
         )
 
     def run(self, query_record: Dict[str, Any]):

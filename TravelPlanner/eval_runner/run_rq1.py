@@ -54,8 +54,8 @@ def _load_split(split: str):
     return ds
 
 
-def _result_paths(config: str, split: str, seed: int):
-    base = _ROOT / "results" / "rq1" / config / split / f"seed{seed}"
+def _result_paths(config: str, split: str, seed: int, results_root: str = "results/rq1"):
+    base = _ROOT / results_root / config / split / f"seed{seed}"
     base.mkdir(parents=True, exist_ok=True)
     return base, base / "results.jsonl"
 
@@ -77,13 +77,13 @@ def _load_done(jsonl_path: Path) -> set:
     return done
 
 
-def _build_agent(config: str, model: str, seed: int):
+def _build_agent(config: str, model: str, seed: int, force_finalize: bool = True):
     if config == "single_react":
         from single_agent_react import SingleAgentReact
-        return SingleAgentReact(model=model, seed=seed)
+        return SingleAgentReact(model=model, seed=seed, force_finalize=force_finalize)
     if config == "planner_executor":
         from planner_executor import PlannerExecutorAgent
-        return PlannerExecutorAgent(model=model, seed=seed)
+        return PlannerExecutorAgent(model=model, seed=seed, force_finalize=force_finalize)
     raise ValueError(config)
 
 
@@ -112,7 +112,13 @@ def main():
     ap.add_argument("--model", default=None,
                     help="defaults to gpt-4o-mini (openai) or Qwen/Qwen2.5-7B-Instruct (vllm)")
     ap.add_argument("--max-steps", type=int, default=30)
+    ap.add_argument("--no-force-finalize", dest="force_finalize", action="store_false",
+                    help="disable near-budget finalization + no-empty-answer backstop "
+                         "(reproduces the original empty-answer behavior)")
+    ap.set_defaults(force_finalize=True)
     ap.add_argument("--limit", type=int, default=None, help="cap queries (debug)")
+    ap.add_argument("--results-root", default="results/rq1",
+                    help="root dir for outputs, e.g. results/rq1_steps50")
     args = ap.parse_args()
 
     if args.model is None:
@@ -127,7 +133,7 @@ def main():
         sys.exit(2)
 
     ds = _load_split(args.split)
-    base_dir, jsonl_path = _result_paths(args.config, args.split, args.seed)
+    base_dir, jsonl_path = _result_paths(args.config, args.split, args.seed, args.results_root)
     plan_dir = base_dir / "generated_plans"
     plan_dir.mkdir(exist_ok=True)
     done = _load_done(jsonl_path)
@@ -144,7 +150,7 @@ def main():
         row = ds[idx]
         query_record = _to_query_record(row)
 
-        agent = _build_agent(args.config, args.model, args.seed)
+        agent = _build_agent(args.config, args.model, args.seed, args.force_finalize)
         t0 = time.time()
         record: Dict[str, Any] = {
             "idx": idx,

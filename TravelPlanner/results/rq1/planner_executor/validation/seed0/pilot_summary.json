@@ -1,0 +1,12 @@
+{
+  "config": "planner_executor",
+  "split": "validation",
+  "seed": 0,
+  "n_queries": 180,
+  "delivery_rate": 0.4777777777777778,
+  "commonsense_macro_pass_rate": 0.005555555555555556,
+  "hard_macro_pass_rate": 0.0,
+  "final_pass_rate": 0.0,
+  "commonsense_micro_pass_rate": 0.2846045197740113,
+  "hard_micro_pass_rate": 0.6
+}
